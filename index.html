@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0a2233">
+<title>Fokus</title>
+<link rel="preload" href="assets/fonts/inter-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/inter-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+<style id="gate-css">
+@font-face{font-family:Inter;src:url(assets/fonts/inter-latin-500-normal.woff2) format("woff2");font-weight:500}
+@font-face{font-family:Inter;src:url(assets/fonts/inter-latin-800-normal.woff2) format("woff2");font-weight:800}
+html,body{margin:0;min-height:100%;}
+body.gate{min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:Inter,system-ui,sans-serif;color:#eaf6f8;
+ background:radial-gradient(60% 50% at 20% 20%,#1f7a8c55,transparent),radial-gradient(50% 50% at 85% 80%,#2b59c355,transparent),#0a2233;}
+.g-card{width:min(88vw,360px);padding:28px 24px;border-radius:24px;background:rgba(255,255,255,.08);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.g-card h1{margin:0 0 4px;font-weight:800;font-size:26px}.g-card p{margin:0 0 18px;opacity:.7;font-size:14px}
+.g-card input[type=password]{box-sizing:border-box;width:100%;font:inherit;font-size:17px;padding:14px 16px;border-radius:14px;border:0;background:rgba(255,255,255,.12);color:#fff;outline:none}
+.g-card label.rm{display:flex;gap:10px;align-items:center;margin:14px 0 18px;font-size:14px;opacity:.85}
+.g-card button{width:100%;font:inherit;font-weight:800;font-size:16px;padding:14px;border:0;border-radius:14px;background:#5fe1d6;color:#062033}
+.g-card button:disabled{opacity:.6}.g-err{color:#ff9b9b;min-height:20px;font-size:14px;margin-top:12px}
+</style>
+</head>
+<body class="gate">
+<form class="g-card" id="gate" autocomplete="on">
+  <h1>Fokus</h1>
+  <p>Bitte Passwort eingeben.</p>
+  <input type="text" name="username" value="fokus" autocomplete="username" hidden>
+  <input type="password" id="pw" autocomplete="current-password" placeholder="Passwort" required autofocus>
+  <label class="rm"><input type="checkbox" id="remember" checked> Auf diesem Gerät merken</label>
+  <button id="go" type="submit">Öffnen</button>
+  <div class="g-err" id="err"></div>
+</form>
+<script>
+(function () {
+  "use strict";
+  var LS = "fokus.k1", te = new TextEncoder(), td = new TextDecoder(), KEY = null;
+  var b64 = function (s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); }); };
+  var unb64 = function (u) { var s = ""; u = new Uint8Array(u); for (var i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); };
+  if (location.hash === "#abmelden") { localStorage.removeItem(LS); history.replaceState(null, "", location.pathname); }
+  var origFetch = window.fetch.bind(window);
+  function getEnc(name) {
+    return origFetch(name + "?t=" + Date.now(), { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status); return r.json();
+    });
+  }
+  function decrypt(obj, key) {
+    return crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(obj.iv) }, key, b64(obj.ct)).then(function (b) { return td.decode(b); });
+  }
+  function derive(pw, obj) {
+    return crypto.subtle.importKey("raw", te.encode(pw), "PBKDF2", false, ["deriveKey"]).then(function (base) {
+      return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: b64(obj.salt), iterations: obj.iter }, base, { name: "AES-GCM", length: 256 }, true, ["decrypt"]);
+    });
+  }
+  function start(shellText) {
+    var s = JSON.parse(shellText);
+    // App erwartet data.json -> verschlüsselte data.enc laden und im Browser entschlüsseln
+    window.fetch = function (input, init) {
+      var url = typeof input === "string" ? input : (input && input.url) || "";
+      if (/^(\.\/)?data\.json(\?|$)/.test(url)) {
+        return getEnc("data.enc").then(function (o) { return decrypt(o, KEY); }).then(function (t) {
+          return new Response(t, { status: 200, headers: { "Content-Type": "application/json" } });
+        }).catch(function (e) { return new Response("", { status: 503, statusText: String(e && e.message || e) }); });
+      }
+      return origFetch(input, init);
+    };
+    document.title = "Fokus – Dashboard";
+    var st = document.createElement("style"); st.textContent = s.css; document.head.appendChild(st);
+    document.getElementById("gate-css").remove();
+    document.body.className = ""; document.body.innerHTML = s.body;
+    var sc = document.createElement("script"); sc.textContent = s.js; document.body.appendChild(sc);
+  }
+  function tryKey(key, shell) {
+    return decrypt(shell, key).then(function (t) { KEY = key; start(t); });
+  }
+  var shellP = getEnc("shell.enc");
+  var err = document.getElementById("err"), go = document.getElementById("go");
+  var saved = localStorage.getItem(LS);
+  if (saved) {
+    shellP.then(function (shell) {
+      return crypto.subtle.importKey("raw", b64(saved), { name: "AES-GCM" }, true, ["decrypt"]).then(function (k) { return tryKey(k, shell); });
+    }).catch(function () { localStorage.removeItem(LS); });
+  }
+  document.getElementById("gate").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var pw = document.getElementById("pw").value; if (!pw) return;
+    go.disabled = true; err.textContent = ""; go.textContent = "Entschlüssele …";
+    shellP.then(function (shell) {
+      return derive(pw, shell).then(function (k) {
+        return decrypt(shell, k).then(function (t) {
+          KEY = k;
+          if (document.getElementById("remember").checked) {
+            return crypto.subtle.exportKey("raw", k).then(function (raw) { localStorage.setItem(LS, unb64(raw)); return t; });
+          }
+          return t;
+        });
+      });
+    }).then(start).catch(function (e) {
+      go.disabled = false; go.textContent = "Öffnen";
+      err.textContent = (e && e.name === "OperationError") ? "Falsches Passwort." : "Fehler: " + (e && e.message || e);
+    });
+  });
+})();
+</script>
+</body>
+</html>

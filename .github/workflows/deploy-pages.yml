@@ -1,0 +1,35 @@
+name: Deploy Pages
+# 12.11.2026 (von Tom übernommen): aktuelle Action-Versionen (Node 24) und ein zweiter
+# Deploy-Versuch, falls GitHub das gerade hochgeladene Artefakt noch nicht findet (Fehler vom 12.11. 01:10 Berlin).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: .
+      - id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+      - name: Kurz warten, dann zweiter Versuch
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+      - id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v5
